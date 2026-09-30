@@ -40,7 +40,7 @@
         "typescript": "^5.9.3"
     },
     "dependencies": {
-        "@midscene/core": "^1.2.1",
+        "@midscene/core": "^1.14.0",
         "@nut-tree-fork/nut-js": "^4.2.6",
         "express": "^5.1.0",
         "gui": "^0.15.6",

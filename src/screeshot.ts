@@ -448,11 +448,12 @@ export async function screenshot(saveFileFullPath?: string): Promise<
         if (!fs.existsSync(folderPath)) {
           fs.mkdirSync(folderPath, { recursive: true });
         }
+        const scale = screenImage.width / display.bounds.width;
         const img = await screenImage.crop(
-          rect.x,
-          rect.y,
-          rect.width,
-          rect.height
+          Math.round(rect.x * scale),
+          Math.round(rect.y * scale),
+          Math.round(rect.width * scale),
+          Math.round(rect.height * scale)
         );
         const buffer = await img.toPng();
         (await Jimp.fromBuffer(buffer)).write(saveFileFullPath as any);

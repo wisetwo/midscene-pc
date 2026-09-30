@@ -59,7 +59,7 @@ export class PCAgent extends Agent<PCDevice> {
         return super.aiTap(locatePrompt, opt);
     }
 
-    public override async aiLocate(prompt: TUserPrompt, opt?: LocateOption): Promise<Pick<LocateResultElement, "center" | "rect"> & { dpr?: number }> {
+    public override async aiLocate(prompt: TUserPrompt, opt?: LocateOption) {
         if (opt?.xpath?.length && opt?.cacheable) {
             if (!this.storage) {
                 console.warn("PCAgent cache not enabled, please set cacheId in options");
