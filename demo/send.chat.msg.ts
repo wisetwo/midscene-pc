@@ -9,7 +9,9 @@ export async function sendChatMsg(pcService: IPCService) {
     pcService,
     launchOptions: {
       windowInfo: {
-        appName: "Weixin",
+        appName: "WeChat",
+        // macOS 微信的搜索结果会在独立窗口中显示
+        includeAppWindows: true,
       },
       /* screenArea: {
                 preferManual: true,

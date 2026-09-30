@@ -11,7 +11,7 @@ import { testCache } from "./cache";
 
 const runDemo = async (pcService: IPCService) => {
     console.log(`running pc agent demo with ${pcService.name}`);
-    //   await sendChatMsg(pcService);
+    await sendChatMsg(pcService);
     //   await browserUse(pcService);
     // await writeFile(pcService);
     // await simpleDragAndDrop(pcService);  执行前请修改
@@ -19,7 +19,7 @@ const runDemo = async (pcService: IPCService) => {
     // await playMusic(pcService);
     // await remoteMonitor();
     // await ymlScriptDemo(pcService);
-    await testCache(pcService);
+    // await testCache(pcService);
 };
 
 (async () => {

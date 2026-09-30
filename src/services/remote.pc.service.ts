@@ -232,5 +232,9 @@ export function createRemotePCService(endpoint: string, token?: string): IPCServ
         : null;
       return { rect: data.rect, monitor };
     },
+    async activateApp(appName: string) {
+      const data = await postJSON<{ success: boolean }>(base, "/app/activate", { appName }, token);
+      return data.success;
+    },
   } satisfies IPCService;
 }

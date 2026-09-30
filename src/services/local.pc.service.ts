@@ -11,6 +11,11 @@ import {
   clipboard as nutClipboard,
 } from "@nut-tree-fork/nut-js";
 import { screenshot } from "../screeshot.js";
+import { execFile } from "node:child_process";
+import os from "node:os";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 class LocalMonitor extends AbstractMonitor {
   constructor(protected _monitor: Monitor) {
@@ -112,5 +117,18 @@ export const localPCService: IPCService = {
       };
     }
     return undefined;
+  },
+  activateApp: async (appName: string) => {
+    if (os.platform() !== "darwin") {
+      return false;
+    }
+    try {
+      // open -a 走 LaunchServices，不需要自动化授权；窗口被关闭（隐藏）时也会重新打开主窗口
+      await execFileAsync("open", ["-a", appName]);
+      return true;
+    } catch (error) {
+      console.warn(`activate app ${appName} failed:`, error);
+      return false;
+    }
   },
 };

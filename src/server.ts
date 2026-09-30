@@ -276,6 +276,17 @@ export function createServer(service: IPCService = localPCService, token?: strin
     }
   });
 
+  // App
+  app.post("/app/activate", async (req: Request, res: Response) => {
+    try {
+      const { appName } = req.body as { appName: string };
+      const success = (await service.activateApp?.(appName)) ?? false;
+      res.json({ success });
+    } catch (err: any) {
+      res.status(500).json({ error: String(err?.message ?? err) });
+    }
+  });
+
   // Screenshot
   app.post("/screenshot", async (req: Request, res: Response) => {
     try {

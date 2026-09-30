@@ -86,6 +86,16 @@ export interface PCDeviceLaunchOptions {
          * default true.
          */
         fixedWindow?: boolean;
+        /**
+         * 截图范围覆盖目标窗口所属应用在同一显示器上的所有窗口（外接矩形），每一步重新计算。
+         * 适用于会弹出独立窗口的应用（如 macOS 微信的搜索结果窗口）。
+         * 开启后 fixedWindow 不生效，并且总是按矩形从显示器截图裁剪。default false.
+         */
+        includeAppWindows?: boolean;
+        /**
+         * launch 时是否先将目标应用切换到前台，依赖 pcService.activateApp。default true.
+         */
+        activate?: boolean;
     };
     /**
      * The full path to save the screenshot when manual mode is enabled.
@@ -109,6 +119,7 @@ export type ScreenTargetFinder = () => Promise<{
     scaleFactor: number;
     captureImage: () => Promise<JimpInstance>;
 }>;
+type ScreenTarget = Awaited<ReturnType<ScreenTargetFinder>>;
 
 type PointerPoint = { x: number; y: number };
 interface WindowInfo {
@@ -141,6 +152,11 @@ export default class PCDevice implements AbstractInterface {
     interfaceType: InterfaceType = "pc";
     private options: PCDeviceOptions;
     private targetFinder: ScreenTargetFinder = undefined as any;
+    /**
+     * 最近一次 size() 计算出的截图区域。screenshotBase64 和坐标换算都复用它，
+     * 保证模型看到的截图与执行动作时的坐标偏移一致（截图区域可能随窗口变化）。
+     */
+    private currentTarget?: ScreenTarget;
     private outputListeners: Map<string, ((output: string) => void)[]> = new Map();
 
     constructor(options?: PCDeviceOptions) {
@@ -154,8 +170,17 @@ export default class PCDevice implements AbstractInterface {
         }
     }
 
+    private async refreshTarget(): Promise<ScreenTarget> {
+        this.currentTarget = await this.targetFinder();
+        return this.currentTarget;
+    }
+
+    private async getTarget(): Promise<ScreenTarget> {
+        return this.currentTarget ?? (await this.refreshTarget());
+    }
+
     private async getScreenPos(regionPos: number[]) {
-        const target = await this.targetFinder();
+        const target = await this.getTarget();
         return {
             x: regionPos[0] + target.rectInGlobal.x,
             y: regionPos[1] + target.rectInGlobal.y,
@@ -223,6 +248,41 @@ export default class PCDevice implements AbstractInterface {
         };
     }
 
+    /**
+     * 计算 anchor 所属应用在同一显示器上所有窗口的外接矩形（裁剪到显示器范围内）
+     */
+    private async findAppWindowsArea(anchor: WindowInfo): Promise<WindowInfo> {
+        const monitor = anchor.currentMonitor;
+        const appWindows = (await this.windows()).filter(
+            // 过滤掉应用创建的极小辅助窗口
+            (w) => w.appName === anchor.appName && w.width >= 20 && w.height >= 20 && w.currentMonitor.id === monitor.id,
+        );
+        if (!appWindows.length) {
+            return anchor;
+        }
+        const left = Math.max(monitor.x, Math.min(...appWindows.map((w) => w.x)));
+        const top = Math.max(monitor.y, Math.min(...appWindows.map((w) => w.y)));
+        const right = Math.min(monitor.x + monitor.width, Math.max(...appWindows.map((w) => w.x + w.width)));
+        const bottom = Math.min(monitor.y + monitor.height, Math.max(...appWindows.map((w) => w.y + w.height)));
+        if (right <= left || bottom <= top) {
+            return anchor;
+        }
+        return { ...anchor, x: left, y: top, width: right - left, height: bottom - top };
+    }
+
+    private async activateApp(appName: string): Promise<boolean> {
+        if (!this.options.pcService.activateApp) {
+            console.debug(`${this.options.pcService.name} does not support activateApp, skip`);
+            return false;
+        }
+        const activated = await this.options.pcService.activateApp(appName);
+        if (activated) {
+            // 等待窗口切到前台并完成绘制
+            await sleep(500);
+        }
+        return activated;
+    }
+
     private async clearInput(pos: { x: number; y: number }, newData?: string) {
         await this.options.pcService.mouse.setPosition({ x: pos.x, y: pos.y });
         await this.options.pcService.mouse.click(MouseButton.LEFT);
@@ -263,9 +323,19 @@ export default class PCDevice implements AbstractInterface {
         }
         console.log("launching pc device");
         this.launched = true;
-        if (this.options.launchOptions?.windowInfo?.appName || this.options.launchOptions?.windowInfo?.title || this.options.launchOptions?.windowInfo?.id) {
+        const windowInfo = this.options.launchOptions?.windowInfo;
+        if (windowInfo?.appName || windowInfo?.title || windowInfo?.id) {
             // try use window info
-            const targetWindow = await this.findWindow();
+            const shouldActivate = windowInfo.activate !== false;
+            let targetWindow = await this.findWindow();
+            if (shouldActivate) {
+                if (targetWindow) {
+                    await this.activateApp(targetWindow.appName);
+                } else if (windowInfo.appName && (await this.activateApp(windowInfo.appName))) {
+                    // 窗口可能被关闭（应用仍在后台），激活后重新查找
+                    targetWindow = await this.findWindow();
+                }
+            }
             if (targetWindow) {
                 const generateTargetInfo = (currentTargetWindow: WindowInfo): ReturnType<ScreenTargetFinder> => {
                     return Promise.resolve({
@@ -284,7 +354,7 @@ export default class PCDevice implements AbstractInterface {
                         scaleFactor: currentTargetWindow.currentMonitor.scaleFactor,
                         captureImage: async () => {
                             let instance: JimpInstance;
-                            if (this.options.launchOptions?.windowInfo?.onlyForRect === false) {
+                            if (windowInfo.onlyForRect === false && !windowInfo.includeAppWindows) {
                                 const image = await currentTargetWindow.captureImage();
                                 instance = (await Jimp.fromBuffer(image)) as any;
                             } else {
@@ -300,8 +370,11 @@ export default class PCDevice implements AbstractInterface {
                         },
                     });
                 };
-                if (this.options.launchOptions?.windowInfo?.fixedWindow) {
-                    this.targetFinder = async () => generateTargetInfo(targetWindow);
+                const anchorWindow = targetWindow;
+                if (windowInfo.includeAppWindows) {
+                    this.targetFinder = async () => generateTargetInfo(await this.findAppWindowsArea(anchorWindow));
+                } else if (windowInfo.fixedWindow) {
+                    this.targetFinder = async () => generateTargetInfo(anchorWindow);
                 } else {
                     this.targetFinder = async () => {
                         const currentTargetWindow = await this.findWindow();
@@ -612,7 +685,7 @@ export default class PCDevice implements AbstractInterface {
      * 设备屏幕大小
      */
     public async size(): Promise<Size> {
-        const targetInfo = await this.targetFinder();
+        const targetInfo = await this.refreshTarget();
         return {
             width: targetInfo.rectInGlobal.width,
             height: targetInfo.rectInGlobal.height,
@@ -623,7 +696,7 @@ export default class PCDevice implements AbstractInterface {
      * 设备屏幕截图
      */
     public async screenshotBase64(): Promise<string> {
-        const targetInfo = await this.targetFinder();
+        const targetInfo = await this.getTarget();
         let screenshot = await targetInfo.captureImage();
         const base64Image = await screenshot.getBase64("image/png");
         return base64Image;

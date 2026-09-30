@@ -317,4 +317,8 @@ export interface IPCService {
       }
     | undefined
   >;
+  /**
+   * 将应用切换到前台，返回是否成功。可选实现，不支持的平台返回false
+   */
+  activateApp?(appName: string): Promise<boolean>;
 }
